@@ -90,7 +90,10 @@ class CCMigration {
   public function remove_api_request_cache() {
     delete_transient( self::CC_MIGRATE_TRANSIENT_NAME );
   }
-
+  public function unique_rename_file( $dir, $name, $ext ) {
+    //this will avoid wordpress to rename files adding numbers at the end 
+    return $name;
+  }
   public function import_media( $entry_id, $parent_id = null ) {
     if ( !empty( $entry_id ) ) {
       $media_url = $this->media_url.$entry_id;
@@ -108,7 +111,12 @@ class CCMigration {
             'error'    => 0,
             'size'     => filesize( $temp_file ),
           );
-          $uploaded_image = wp_handle_sideload( $file, array('test_form' => false, 'test_type' => true, 'test_upload' => true) );
+          $uploaded_image = wp_handle_sideload( $file, array(
+            'test_form' => false, 
+            'test_type' => true, 
+            'test_upload' => true,
+            'unique_filename_callback' => array( $this, 'unique_rename_file' )
+          ));
           if ( empty( $uploaded_image['error'] ) ) {
             $image_meta = array(
               'post_title' => esc_attr($api_response->title->rendered),
