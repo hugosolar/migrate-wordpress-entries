@@ -155,7 +155,6 @@ class CCMigration {
     }
   }
   public function create_term( $term ) {
-    echo '<pre>'; print_r($term); echo '</pre>';
     if ( !empty( $term ) ) {
       $term_data = wp_insert_term(
         $term->name,
