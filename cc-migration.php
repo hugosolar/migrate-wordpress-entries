@@ -47,6 +47,7 @@ class CCMigration {
     add_action("wp_ajax_do_migration", array($this, "cc_org_do_migration"));
     add_action("wp_ajax_nopriv_do_migration", array($this, "cc_org_do_migration"));
   }
+
   public function enqueue_assets( $hook ) {
     if ( $hook == 'tools_page_cc_migration' ) {
       $this->remove_api_request_cache();
@@ -58,6 +59,7 @@ class CCMigration {
       wp_localize_script('cc-migration', 'CC_entries', $id_entries);
     }
   }
+
   public function query_api( $url ) {
     $response = wp_remote_get( $url );
     $http_code = wp_remote_retrieve_response_code( $response );
@@ -68,6 +70,7 @@ class CCMigration {
       return false;
     }
   }
+
   public function get_cc_org_data() {
     if ( false === ( $api_response = get_transient( self::CC_MIGRATE_TRANSIENT_NAME ) ) ) {
       $url_params = $this->query_url.'?per_page='.$this->posts_per_page;
@@ -87,13 +90,24 @@ class CCMigration {
     }
     return $api_response;
   }
+
   public function remove_api_request_cache() {
     delete_transient( self::CC_MIGRATE_TRANSIENT_NAME );
   }
+
   public function unique_rename_file( $dir, $name, $ext ) {
     //this will avoid wordpress to rename files adding numbers at the end 
     return $name;
   }
+
+  public function get_original_image( $image_entry ) {
+    $source_url = explode( "/", $image_entry->source_url );
+    $original_image_name = $image_entry->media_details->original_image;
+    $source_url[count($source_url)-1] = $original_image_name;
+    $new_url = implode( "/", $source_url );
+    return $new_url;
+  }
+
   public function import_media( $entry_id, $parent_id = null ) {
     if ( !empty( $entry_id ) ) {
       $media_url = $this->media_url.$entry_id;
@@ -102,19 +116,34 @@ class CCMigration {
         require_once( ABSPATH . 'wp-admin/includes/file.php' );
         require_once( ABSPATH . 'wp-admin/includes/image.php' );
         $image_url = $api_response->source_url;
+        $original_image = $this->get_original_image( $api_response );
         $temp_file = download_url( $image_url );
+        $original_temp_file = download_url($original_image);
         if ( !is_wp_error( $temp_file ) ) {
+          $file_original = array(
+            'name'     => basename($original_image),
+            'type'     => $api_response->mime_type,
+            'tmp_name' => $original_temp_file,
+            'error'    => 0,
+            'size'     => filesize( $original_temp_file ),
+          );
           $file = array(
-            'name'     => basename($image_url), // ex: wp-header-logo.png
+            'name'     => basename($image_url),
             'type'     => $api_response->mime_type,
             'tmp_name' => $temp_file,
             'error'    => 0,
             'size'     => filesize( $temp_file ),
           );
+          $uploaded_original_image = wp_handle_sideload( $file_original, array(
+            'test_form' => false, 
+            'test_type' => true, 
+            'test_upload' => true, 
+            'unique_filename_callback' => array( $this, 'unique_rename_file' )
+          ));
           $uploaded_image = wp_handle_sideload( $file, array(
             'test_form' => false, 
             'test_type' => true, 
-            'test_upload' => true,
+            'test_upload' => true, 
             'unique_filename_callback' => array( $this, 'unique_rename_file' )
           ));
           if ( empty( $uploaded_image['error'] ) ) {
@@ -123,10 +152,16 @@ class CCMigration {
               'post_excerpt' => $api_response->caption->rendered,
               'post_mime_type' => $uploaded_image['type']
             );
+            //first original image
+            $attach_original_id = wp_insert_attachment( $image_meta, $uploaded_original_image['file'], $parent_id );
+            $attach_data_original = wp_generate_attachment_metadata( $attach_original_id, $uploaded_original_image['file'] );
+            wp_update_attachment_metadata( $attach_original_id, $attach_data_original );
+            //then the WP scaled version
             $attach_id = wp_insert_attachment( $image_meta, $uploaded_image['file'], $parent_id );
             update_post_meta( $attach_id, '_wp_attachment_image_alt', $api_response->alt_text );
             $attach_data = wp_generate_attachment_metadata( $attach_id, $uploaded_image['file'] );
             wp_update_attachment_metadata( $attach_id, $attach_data );
+
             return $attach_id;
           }
         } else {
@@ -154,6 +189,7 @@ class CCMigration {
     }
     return $entry_content;
   }
+
   public function get_terms( $term_access ) {
     $api_response = $this->query_api( $term_access->href );
     if ( !empty( $api_response ) ) {
@@ -162,6 +198,7 @@ class CCMigration {
       return false;
     }
   }
+
   public function create_term( $term ) {
     if ( !empty( $term ) ) {
       $term_data = wp_insert_term(
@@ -179,6 +216,7 @@ class CCMigration {
       }
     }
   }
+
   public function process_entry_terms( $entry, $inserted_post_id ) {
     if ( !empty( $entry ) ) {
       wp_remove_object_terms( $inserted_post_id, array( 1 ), 'category' );
@@ -203,6 +241,7 @@ class CCMigration {
       }
     }
   }
+  
   // TODO improve error handling
   public function process_entry( $entry_id ) {
     $entries = $this->get_cc_org_data();
